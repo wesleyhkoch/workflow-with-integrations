@@ -1,0 +1,66 @@
+name: Validate code, create production build and warn in Discord
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🏭 Setup repo
+        uses: actions/checkout@v3
+
+      - name: 🏭 Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: 🏭 Setup expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 🔑 Configure GitHub
+        run: |
+          git config --global user.email "${{ secrets.GIT_EMAIL }}"
+          git config --global user.name "${{ secrets.GIT_NAME }}"
+
+      - name: 📦 Install dependencies
+        run: npm install
+
+      - name: 🚀 Build aab
+        uses: expo/expo-github-action@v8
+        id: build
+        with:
+          command: eas build -p android --non-interactive
+
+      - name: 🔎 Get app version
+        run: |
+          tag=$(jq -r .expo.version < app.json) || tag=unknown
+          echo "tag=$tag" >> $GITHUB_ENV
+
+      - name: ⚙️ Create release
+        env:
+          GH_TOKEN: ${{ secrets.GIT_TOKEN }}
+        run: |
+          git tag -f -a v${{ env.tag }} -m "Release version ${{ env.tag }}"
+          gh release create "v${{ env.tag }}" \
+          --repo="$GITHUB_REPOSITORY" \
+          --title="v${{ env.tag }}" \
+          --generate-notes \
+
+      - name: 💬 Comment in discord
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          username: 'GitHub Actions'
+          avatar-url: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'
+          content: '**Build em produção gerado!**'
+          embed-description: |
+            - Build URL: ${{ steps.build.outputs.android_link }}
